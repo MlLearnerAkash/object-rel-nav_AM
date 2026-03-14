@@ -12,10 +12,17 @@ from torchvision import transforms
 from huggingface_hub import hf_hub_download
 import matplotlib.pyplot as plt
 import matplotlib
-
+from icecream import ic
+import cv2
 matplotlib.use("Agg")  # Use the Agg backend to suppress plots
 import logging
 
+#NOTE: Import heatmap generator
+# import sys
+# sys.path.append("/data/ws/RXR_VLN/rxr_open_clip")
+# from open_clip_feature_extraction import CLIPAdapter
+# from attention_model import MultiHeadAttentionLocalization
+# from heatmap_generator import HeatmapGenerator
 # # TODO
 # import warnings
 
@@ -69,7 +76,6 @@ class ObjRelLearntController:
             self.config = config
         else:
             raise ValueError(f"config must be a filepath or a dict, not {type(config)}")
-
         self.goal_source = kwargs.get("goal_source", None)
 
         self.dirname_vis_episode = kwargs.get("dirname_vis_episode", None)
@@ -129,6 +135,25 @@ class ObjRelLearntController:
         self.rank_enc = generate_positional_encodings(200, self.config["dims"])
         self.waypoint_index = self.config["waypoint_index"]
         print("Learnt controller initialized!")
+
+        # #NOTE: Intializing object rank predictor
+        # self.clip_adapter = CLIPAdapter(device=self.device)
+        # self.attention_model = MultiHeadAttentionLocalization(
+        #     embed_dim=512,
+        #     num_heads=8,
+        #     patch_size=7,
+        #     use_transformer_decoder=True
+        # ).to(self.device)
+        # self.heatmap_generator = HeatmapGenerator(
+        #     clip_adapter=self.clip_adapter,
+        #     attention_model=self.attention_model,
+        #     patch_size=7
+        # ).to(self.device)
+
+        # checkpoint = torch.load(self.config["rank_predictor_model_path"], map_location=self.device)
+        # self.attention_model.load_state_dict(checkpoint['attention_model_state_dict'])
+        # self.heatmap_generator.load_state_dict(checkpoint['heatmap_generator_state_dict'])
+        # self.heatmap_generator.eval()
 
     def reset_params(self):
         """
@@ -214,6 +239,7 @@ class ObjRelLearntController:
 
     def ready_obs(self, rgb):
         obs_image = resize_and_aspect_crop(Image.fromarray(rgb), self.image_size)
+
         self.maintain_history(obs_image, self.image_history)
         obs_image = torch.as_tensor(torch.cat(self.image_history), dtype=torch.float32)
         obs_image, _ = get_obs_image(
@@ -251,15 +277,57 @@ class ObjRelLearntController:
             goal_vis = goal_enc[:3, :, :]  # temporary variable
             if self.config["dims"] < 3:
                 goal_vis = goal_enc[:1].repeat(3, axis=0)
+
             goal_image = torch.as_tensor(
                 np.concatenate([goal_vis, goal_enc], axis=0), dtype=torch.float32
             )[None, ...]
+            #NOTE: Saving goal image per channel.
+            # if self.dirname_vis_episode is not None:
+            #     self.save_goal_encoding_heatmap(goal_enc, goal_vis)
 
         goal_image, _ = get_goal_image(
             goal_image, self.goal_type, self.transform, self.device
         )
         return goal_image
-
+    
+    def save_goal_encoding_heatmap(self, goal_enc, goal_vis):
+        """Save goal encoding channels as heatmap overlays"""
+        import os
+        os.makedirs(self.dirname_vis_episode, exist_ok=True)
+        
+        # Convert visualization to RGB image
+        vis_rgb = goal_vis.numpy() if isinstance(goal_vis, torch.Tensor) else goal_vis
+        vis_rgb = vis_rgb.transpose(1, 2, 0)  # CHW to HWC
+        vis_rgb = ((vis_rgb - vis_rgb.min()) / (vis_rgb.max() - vis_rgb.min()) * 255).astype(np.uint8)
+        
+        # Get number of encoding channels (exclude vis channels)
+        n_enc_channels = goal_enc.shape[0]
+        
+        fig, axes = plt.subplots(2, (n_enc_channels + 2) // 2, figsize=(15, 6))
+        axes = axes.flatten()
+        
+        # Plot each encoding channel
+        for ch_idx in range(n_enc_channels):
+            channel = goal_enc[ch_idx]
+            if isinstance(channel, torch.Tensor):
+                channel = channel.numpy()
+            
+            # Create heatmap
+            axes[ch_idx].imshow(vis_rgb, alpha=0.5)
+            heatmap = axes[ch_idx].imshow(channel, cmap='jet', alpha=0.5)
+            axes[ch_idx].set_title(f'Channel {ch_idx}')
+            axes[ch_idx].axis('off')
+            plt.colorbar(heatmap, ax=axes[ch_idx], fraction=0.046, pad=0.04)
+        
+        # Hide extra subplots
+        for idx in range(n_enc_channels, len(axes)):
+            axes[idx].axis('off')
+        
+        plt.tight_layout()
+        save_path = os.path.join(self.dirname_vis_episode, f'goal_encoding_heatmap_{self.iter:04d}.png')
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved goal encoding heatmap to {save_path}")
     def predict_goal_idx(self, rgb, goal_data, reverse=False):
         with torch.no_grad():
             obs_image = self.ready_obs(rgb)
@@ -292,8 +360,10 @@ class ObjRelLearntController:
         v, w = 0, 0
         with torch.no_grad():
             obs_image = self.ready_obs(rgb)
+            #NOTE: Object rank predictor
+            # results= self.predict_object_ranks(rgb)
+            # ic(results.shape)
             goal_image = self.ready_goal(goal_data)
-
             model_outputs = self.model(obs_image, goal_image)
             _, action_pred = model_outputs
             self.action_pred = action_pred[0].float().cpu().numpy()
@@ -330,6 +400,23 @@ class ObjRelLearntController:
                 }
             )
         return v, -w, vis_img
+    # def predict_object_ranks(self, rgb, text_queries: str= "go straight"):
+    #     """
+    #     Predict object ranks given RGB image and text queries
+    #     """
+        
+    #     with torch.no_grad():
+    #         rgb_pil = Image.fromarray(rgb)
+    #         single_batch = {
+    #                     'panorama': [rgb_pil],
+    #                     'instruction': text_queries,
+    #                     'image_heatmap_pts': ["heatmap_17DRP5sb8fy_0e92a69a50414253a23043758f111cec_1.569941632024836.npy"],
+    #                     'scan_id': "17DRP5sb8fy" #Some random number
+    #                 }
+    #         results= self.heatmap_generator(single_batch)
+    #         patch_heatmap= results['patch_predictions']
+    #     return patch_heatmap.cpu().numpy()
+
 
 
 def visualize_prediction(

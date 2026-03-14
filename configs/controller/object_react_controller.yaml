@@ -35,3 +35,6 @@ learn_angle: True
 
 # dataset specific parameters
 image_size: [85, 64] # width, height
+
+#Rank predictor
+rank_predictor_model_path: "/data/dataset/RXR/ours/checkpoints/model_epoch_8.pth"

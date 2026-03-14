@@ -27,7 +27,7 @@ from argparse import ArgumentParser
 import logging
 import yaml
 import traceback
-
+from icecream import ic
 from libs.logger import default_logger
 
 if "LOG_LEVEL" not in os.environ:

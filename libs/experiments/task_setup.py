@@ -14,7 +14,7 @@ import networkx as nx
 import habitat_sim
 
 import logging
-
+from icecream import ic
 logger = logging.getLogger(
     "[Task Setup]"
 )  # logger level is explicitly set below by LOG_LEVEL
@@ -791,6 +791,8 @@ class Episode:
             else:
                 self.velocity_control, self.theta_control, self.vis_img = self.goal_controller.predict(
                     rgb, self.control_input_learnt)
+                #NOTE: To check what image fed to contoller.
+                # cv2.imwrite("/data/ws/object-rel-nav/misc/input_to_contoller.png", rgb[:, :, ::-1])
             self.controller_logs = self.goal_controller.controller_logs
 
         else:

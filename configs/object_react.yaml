@@ -1,12 +1,12 @@
 # required paths
 path_dataset: './data/'
-path_models: ''
+path_models: '/data/ws/object-rel-nav/model_weights/latest.pth'
 path_results: './out/results/'
 
 # episode/task settings
 start_idx: 0
-step_idx: 3
-end_idx: 108
+step_idx: 1
+end_idx: 1
 
 reverse: False
 task_type: "original" # from ["original", "alt_goal", "via_alt_goal"]
@@ -93,3 +93,4 @@ controller:
   v_max: 0.2
   w_min: -0.3
   w_max: 0.3
+
